@@ -1,0 +1,3 @@
+package: github.com/scothis/stream-spike
+import:
+- package: k8s.io/apimachinery
