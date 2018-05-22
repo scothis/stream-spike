@@ -3,3 +3,4 @@ import:
 - package: k8s.io/apimachinery
 - package: k8s.io/client-go
   version: ^7.0.0
+- package: github.com/golang/groupcache

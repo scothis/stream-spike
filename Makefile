@@ -38,6 +38,9 @@ clean:
 	rm -fR pkg/client
 	rm -f $(GENERATED_SOURCE)
 
+dockerize: $(GO_SOURCES) vendor
+	docker build . -t scothis/stream-controller:spike
+
 vendor: glide.lock
 	glide install -v --force
 
@@ -55,3 +58,4 @@ hack/glide.lock: hack/glide.yaml
 kubectl-apply:
 	kubectl apply -f config/stream-resource.yaml
 	kubectl apply -f config/subscription-resource.yaml
+	kubectl apply -f config/controller-deployment.yaml

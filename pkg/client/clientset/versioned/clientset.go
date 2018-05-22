@@ -18,7 +18,7 @@ package versioned
 
 import (
 	glog "github.com/golang/glog"
-	spikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike/v1alpha1"
+	spikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike.local/v1alpha1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"

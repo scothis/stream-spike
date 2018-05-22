@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cmd
+package main
 
 import (
 	"flag"
@@ -31,7 +31,6 @@ import (
 	informers "github.com/scothis/stream-spike/pkg/client/informers/externalversions"
 	"github.com/scothis/stream-spike/pkg/signals"
 	"github.com/scothis/stream-spike/pkg/stream"
-	"github.com/scothis/stream-spike/pkg/subscription"
 )
 
 var (
@@ -63,21 +62,24 @@ func main() {
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
 
-	controllers := []Controller*{
+	// TOOD make a common interface for controller
+	controllers := []*stream.Controller{
 		stream.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
-		subscription.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
+		// subscription.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 	}
 
 	go kubeInformerFactory.Start(stopCh)
 	go exampleInformerFactory.Start(stopCh)
 
 	for _, controller := range controllers {
-		go func() {
+		go func(controller *stream.Controller) {
 			if err = controller.Run(2, stopCh); err != nil {
 				glog.Fatalf("Error running controller: %s", err.Error())
 			}
-		}()
+		}(controller)
 	}
+
+	<-stopCh
 }
 
 func init() {

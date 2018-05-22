@@ -1,0 +1,4 @@
+apiVersion: spike.local/v1alpha1
+kind: Stream
+metadata:
+  name: test

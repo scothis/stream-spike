@@ -18,8 +18,8 @@ package fake
 
 import (
 	clientset "github.com/scothis/stream-spike/pkg/client/clientset/versioned"
-	spikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike/v1alpha1"
-	fakespikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike/v1alpha1/fake"
+	spikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike.local/v1alpha1"
+	fakespikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike.local/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"

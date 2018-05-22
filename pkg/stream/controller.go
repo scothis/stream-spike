@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,7 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	appslisters "k8s.io/client-go/listers/apps/v1"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -40,7 +39,7 @@ import (
 	clientset "github.com/scothis/stream-spike/pkg/client/clientset/versioned"
 	streamscheme "github.com/scothis/stream-spike/pkg/client/clientset/versioned/scheme"
 	informers "github.com/scothis/stream-spike/pkg/client/informers/externalversions"
-	listers "github.com/scothis/stream-spike/pkg/client/listers/spike/v1alpha1"
+	listers "github.com/scothis/stream-spike/pkg/client/listers/spike.local/v1alpha1"
 
 	spikev1alpha1 "github.com/scothis/stream-spike/pkg/apis/spike.local/v1alpha1"
 )
@@ -51,11 +50,11 @@ const (
 	// SuccessSynced is used as part of the Event 'reason' when a Stream is synced
 	SuccessSynced = "Synced"
 	// ErrResourceExists is used as part of the Event 'reason' when a Stream fails
-	// to sync due to a Deployment of the same name already existing.
+	// to sync due to a Service of the same name already existing.
 	ErrResourceExists = "ErrResourceExists"
 
 	// MessageResourceExists is the message used for Events when a resource
-	// fails to sync due to a Deployment already existing
+	// fails to sync due to a Service already existing
 	MessageResourceExists = "Resource %q already exists and is not managed by Stream"
 	// MessageResourceSynced is the message used for an Event fired when a Stream
 	// is synced successfully
@@ -69,10 +68,10 @@ type Controller struct {
 	// streamclientset is a clientset for our own API group
 	streamclientset clientset.Interface
 
-	deploymentsLister appslisters.DeploymentLister
-	deploymentsSynced cache.InformerSynced
-	streamsLister     listers.StreamLister
-	streamsSynced     cache.InformerSynced
+	servicesLister corelisters.ServiceLister
+	servicesSynced cache.InformerSynced
+	streamsLister  listers.StreamLister
+	streamsSynced  cache.InformerSynced
 
 	// workqueue is a rate limited work queue. This is used to queue work to be
 	// processed instead of performing it as soon as a change happens. This
@@ -92,10 +91,10 @@ func NewController(
 	kubeInformerFactory kubeinformers.SharedInformerFactory,
 	streamInformerFactory informers.SharedInformerFactory) *Controller {
 
-	// obtain references to shared index informers for the Deployment and Stream
+	// obtain references to shared index informers for the Service and Stream
 	// types.
-	deploymentInformer := kubeInformerFactory.Apps().V1().Deployments()
-	streamInformer := streamInformerFactory.Samplecontroller().V1alpha1().Streams()
+	serviceInformer := kubeInformerFactory.Core().V1().Services()
+	streamInformer := streamInformerFactory.Spike().V1alpha1().Streams()
 
 	// Create event broadcaster
 	// Add stream-controller types to the default Kubernetes Scheme so Events can be
@@ -108,14 +107,14 @@ func NewController(
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	controller := &Controller{
-		kubeclientset:     kubeclientset,
-		streamclientset:   streamclientset,
-		deploymentsLister: deploymentInformer.Lister(),
-		deploymentsSynced: deploymentInformer.Informer().HasSynced,
-		streamsLister:     streamInformer.Lister(),
-		streamsSynced:     streamInformer.Informer().HasSynced,
-		workqueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Streams"),
-		recorder:          recorder,
+		kubeclientset:   kubeclientset,
+		streamclientset: streamclientset,
+		servicesLister:  serviceInformer.Lister(),
+		servicesSynced:  serviceInformer.Informer().HasSynced,
+		streamsLister:   streamInformer.Lister(),
+		streamsSynced:   streamInformer.Informer().HasSynced,
+		workqueue:       workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Streams"),
+		recorder:        recorder,
 	}
 
 	glog.Info("Setting up event handlers")
@@ -126,20 +125,20 @@ func NewController(
 			controller.enqueueStream(new)
 		},
 	})
-	// Set up an event handler for when Deployment resources change. This
-	// handler will lookup the owner of the given Deployment, and if it is
+	// Set up an event handler for when Service resources change. This
+	// handler will lookup the owner of the given Service, and if it is
 	// owned by a Stream resource will enqueue that Stream resource for
 	// processing. This way, we don't need to implement custom logic for
-	// handling Deployment resources. More info on this pattern:
+	// handling Service resources. More info on this pattern:
 	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
-	deploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	serviceInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.handleObject,
 		UpdateFunc: func(old, new interface{}) {
-			newDepl := new.(*appsv1.Deployment)
-			oldDepl := old.(*appsv1.Deployment)
-			if newDepl.ResourceVersion == oldDepl.ResourceVersion {
-				// Periodic resync will send update events for all known Deployments.
-				// Two different versions of the same Deployment will always have different RVs.
+			newService := new.(*corev1.Service)
+			oldService := old.(*corev1.Service)
+			if newService.ResourceVersion == oldService.ResourceVersion {
+				// Periodic resync will send update events for all known Services.
+				// Two different versions of the same Service will always have different RVs.
 				return
 			}
 			controller.handleObject(new)
@@ -163,7 +162,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 
 	// Wait for the caches to be synced before starting workers
 	glog.Info("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.deploymentsSynced, c.streamsSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.servicesSynced, c.streamsSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
@@ -265,20 +264,12 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
-	deploymentName := stream.Spec.DeploymentName
-	if deploymentName == "" {
-		// We choose to absorb the error here as the worker would requeue the
-		// resource otherwise. Instead, the next time the resource is updated
-		// the resource will be queued again.
-		runtime.HandleError(fmt.Errorf("%s: deployment name must be specified", key))
-		return nil
-	}
-
-	// Get the deployment with the name specified in Stream.spec
-	deployment, err := c.deploymentsLister.Deployments(stream.Namespace).Get(deploymentName)
+	// Get the service with the specified service name
+	serviceName := fmt.Sprintf("%s-stream", name)
+	service, err := c.servicesLister.Services(stream.Namespace).Get(serviceName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
-		deployment, err = c.kubeclientset.AppsV1().Deployments(stream.Namespace).Create(newDeployment(stream))
+		service, err = c.kubeclientset.CoreV1().Services(stream.Namespace).Create(newService(stream))
 	}
 
 	// If an error occurs during Get/Create, we'll requeue the item so we can
@@ -288,32 +279,17 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
-	// If the Deployment is not controlled by this Stream resource, we should log
-	// a warning to the event recorder and ret
-	if !metav1.IsControlledBy(deployment, stream) {
-		msg := fmt.Sprintf(MessageResourceExists, deployment.Name)
+	// If the Service is not controlled by this Stream resource, we should log
+	// a warning to the event recorder and return
+	if !metav1.IsControlledBy(service, stream) {
+		msg := fmt.Sprintf(MessageResourceExists, service.Name)
 		c.recorder.Event(stream, corev1.EventTypeWarning, ErrResourceExists, msg)
 		return fmt.Errorf(msg)
 	}
 
-	// If this number of the replicas on the Stream resource is specified, and the
-	// number does not equal the current desired replicas on the Deployment, we
-	// should update the Deployment resource.
-	if stream.Spec.Replicas != nil && *stream.Spec.Replicas != *deployment.Spec.Replicas {
-		glog.V(4).Infof("Stream %s replicas: %d, deployment replicas: %d", name, *stream.Spec.Replicas, *deployment.Spec.Replicas)
-		deployment, err = c.kubeclientset.AppsV1().Deployments(stream.Namespace).Update(newDeployment(stream))
-	}
-
-	// If an error occurs during Update, we'll requeue the item so we can
-	// attempt processing again later. THis could have been caused by a
-	// temporary network failure, or any other transient reason.
-	if err != nil {
-		return err
-	}
-
 	// Finally, we update the status block of the Stream resource to reflect the
 	// current state of the world
-	err = c.updateStreamStatus(stream, deployment)
+	err = c.updateStreamStatus(stream, service)
 	if err != nil {
 		return err
 	}
@@ -322,17 +298,16 @@ func (c *Controller) syncHandler(key string) error {
 	return nil
 }
 
-func (c *Controller) updateStreamStatus(stream *spikev1alpha1.Stream, deployment *appsv1.Deployment) error {
+func (c *Controller) updateStreamStatus(stream *spikev1alpha1.Stream, service *corev1.Service) error {
 	// NEVER modify objects from the store. It's a read-only, local cache.
 	// You can use DeepCopy() to make a deep copy of original object and modify this copy
 	// Or create a copy manually for better performance
 	streamCopy := stream.DeepCopy()
-	streamCopy.Status.AvailableReplicas = deployment.Status.AvailableReplicas
 	// If the CustomResourceSubresources feature gate is not enabled,
 	// we must use Update instead of UpdateStatus to update the Status block of the Stream resource.
 	// UpdateStatus will not allow changes to the Spec of the resource,
 	// which is ideal for ensuring nothing other than resource status has been updated.
-	_, err := c.streamclientset.SamplecontrollerV1alpha1().Streams(stream.Namespace).Update(streamCopy)
+	_, err := c.streamclientset.SpikeV1alpha1().Streams(stream.Namespace).Update(streamCopy)
 	return err
 }
 
@@ -389,18 +364,18 @@ func (c *Controller) handleObject(obj interface{}) {
 	}
 }
 
-// newDeployment creates a new Deployment for a Stream resource. It also sets
+// newService creates a new Service for a Stream resource. It also sets
 // the appropriate OwnerReferences on the resource so handleObject can discover
 // the Stream resource that 'owns' it.
-func newDeployment(stream *spikev1alpha1.Stream) *appsv1.Deployment {
+func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 	labels := map[string]string{
-		"app":        "nginx",
-		"controller": stream.Name,
+		"stream": stream.Name,
 	}
-	return &appsv1.Deployment{
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      stream.Spec.DeploymentName,
+			Name:      fmt.Sprintf("%s-stream", stream.ObjectMeta.Name),
 			Namespace: stream.Namespace,
+			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(stream, schema.GroupVersionKind{
 					Group:   spikev1alpha1.SchemeGroupVersion.Group,
@@ -409,23 +384,9 @@ func newDeployment(stream *spikev1alpha1.Stream) *appsv1.Deployment {
 				}),
 			},
 		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: stream.Spec.Replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: labels,
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "nginx",
-							Image: "nginx:latest",
-						},
-					},
-				},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{Port: 80},
 			},
 		},
 	}
