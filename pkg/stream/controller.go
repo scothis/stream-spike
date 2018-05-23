@@ -265,7 +265,7 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	// Get the service with the specified service name
-	serviceName := fmt.Sprintf("%s-stream", name)
+	serviceName := streamServiceName(name)
 	service, err := c.servicesLister.Services(stream.Namespace).Get(serviceName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
@@ -373,7 +373,7 @@ func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-stream", stream.ObjectMeta.Name),
+			Name:      streamServiceName(stream.ObjectMeta.Name),
 			Namespace: stream.Namespace,
 			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{
@@ -388,6 +388,12 @@ func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 			Ports: []corev1.ServicePort{
 				{Port: 80},
 			},
+			// TODO remove this when an Ingress option is supported
+			Type: "NodePort",
 		},
 	}
+}
+
+func streamServiceName(streamName string) string {
+	return fmt.Sprintf("%s-stream", streamName)
 }

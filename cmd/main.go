@@ -31,12 +31,17 @@ import (
 	informers "github.com/scothis/stream-spike/pkg/client/informers/externalversions"
 	"github.com/scothis/stream-spike/pkg/signals"
 	"github.com/scothis/stream-spike/pkg/stream"
+	"github.com/scothis/stream-spike/pkg/subscription"
 )
 
 var (
 	masterURL  string
 	kubeconfig string
 )
+
+type controller interface {
+	Run(threadiness int, stopCh <-chan struct{}) error
+}
 
 func main() {
 	flag.Parse()
@@ -62,21 +67,20 @@ func main() {
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
 
-	// TOOD make a common interface for controller
-	controllers := []*stream.Controller{
+	controllers := []controller{
 		stream.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
-		// subscription.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
+		subscription.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 	}
 
 	go kubeInformerFactory.Start(stopCh)
 	go exampleInformerFactory.Start(stopCh)
 
-	for _, controller := range controllers {
-		go func(controller *stream.Controller) {
-			if err = controller.Run(2, stopCh); err != nil {
+	for _, c := range controllers {
+		go func(c controller) {
+			if err = c.Run(2, stopCh); err != nil {
 				glog.Fatalf("Error running controller: %s", err.Error())
 			}
-		}(controller)
+		}(c)
 	}
 
 	<-stopCh
