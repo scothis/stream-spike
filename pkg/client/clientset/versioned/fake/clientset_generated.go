@@ -18,6 +18,8 @@ package fake
 
 import (
 	clientset "github.com/scothis/stream-spike/pkg/client/clientset/versioned"
+	configv1alpha2 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/config.istio.io/v1alpha2"
+	fakeconfigv1alpha2 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/config.istio.io/v1alpha2/fake"
 	spikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike.local/v1alpha1"
 	fakespikev1alpha1 "github.com/scothis/stream-spike/pkg/client/clientset/versioned/typed/spike.local/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -59,6 +61,16 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 }
 
 var _ clientset.Interface = &Clientset{}
+
+// ConfigV1alpha2 retrieves the ConfigV1alpha2Client
+func (c *Clientset) ConfigV1alpha2() configv1alpha2.ConfigV1alpha2Interface {
+	return &fakeconfigv1alpha2.FakeConfigV1alpha2{Fake: &c.Fake}
+}
+
+// Config retrieves the ConfigV1alpha2Client
+func (c *Clientset) Config() configv1alpha2.ConfigV1alpha2Interface {
+	return &fakeconfigv1alpha2.FakeConfigV1alpha2{Fake: &c.Fake}
+}
 
 // SpikeV1alpha1 retrieves the SpikeV1alpha1Client
 func (c *Clientset) SpikeV1alpha1() spikev1alpha1.SpikeV1alpha1Interface {

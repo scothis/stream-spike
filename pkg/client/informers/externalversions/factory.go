@@ -20,6 +20,7 @@ package externalversions
 
 import (
 	versioned "github.com/scothis/stream-spike/pkg/client/clientset/versioned"
+	config_istio_io "github.com/scothis/stream-spike/pkg/client/informers/externalversions/config.istio.io"
 	internalinterfaces "github.com/scothis/stream-spike/pkg/client/informers/externalversions/internalinterfaces"
 	spike_local "github.com/scothis/stream-spike/pkg/client/informers/externalversions/spike.local"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,7 +123,12 @@ type SharedInformerFactory interface {
 	ForResource(resource schema.GroupVersionResource) (GenericInformer, error)
 	WaitForCacheSync(stopCh <-chan struct{}) map[reflect.Type]bool
 
+	Config() config_istio_io.Interface
 	Spike() spike_local.Interface
+}
+
+func (f *sharedInformerFactory) Config() config_istio_io.Interface {
+	return config_istio_io.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Spike() spike_local.Interface {

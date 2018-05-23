@@ -17,6 +17,7 @@
 package fake
 
 import (
+	configv1alpha2 "github.com/scothis/stream-spike/pkg/apis/config.istio.io/v1alpha2"
 	spikev1alpha1 "github.com/scothis/stream-spike/pkg/apis/spike.local/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -48,6 +49,7 @@ func init() {
 // After this, RawExtensions in Kubernetes types will serialize kube-aggregator types
 // correctly.
 func AddToScheme(scheme *runtime.Scheme) {
+	configv1alpha2.AddToScheme(scheme)
 	spikev1alpha1.AddToScheme(scheme)
 
 }

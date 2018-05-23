@@ -14,23 +14,24 @@ build: $(GO_SOURCES) vendor
 codegen: $(GENERATED_SOURCE)
 
 $(GENERATED_SOURCE): $(GO_SOURCES) hack/vendor vendor
+	# config.istio.io:v1alpha2
 	hack/vendor/k8s.io/code-generator/generate-groups.sh all \
       github.com/scothis/stream-spike/pkg/client \
       github.com/scothis/stream-spike/pkg/apis \
-      spike.local:v1alpha1 \
+      "spike.local:v1alpha1 config.istio.io:v1alpha2" \
       --go-header-file  hack/boilerplate.go.txt
 	hack/vendor/k8s.io/code-generator/generate-internal-groups.sh defaulter \
       github.com/scothis/stream-spike/pkg/client \
       '' \
       github.com/scothis/stream-spike/pkg/apis \
-      spike.local:v1alpha1 \
+      "spike.local:v1alpha1 config.istio.io:v1alpha2" \
       --go-header-file  hack/boilerplate.go.txt
 
 codegen-verify: hack/vendor vendor
 	hack/vendor/k8s.io/code-generator/generate-groups.sh all \
       github.com/scothis/stream-spike/pkg/client \
       github.com/scothis/stream-spike/pkg/apis \
-      spike.local:v1alpha1 \
+      "spike.local:v1alpha1 config.istio.io:v1alpha2" \
       --go-header-file  hack/boilerplate.go.txt \
       --verify-only
 

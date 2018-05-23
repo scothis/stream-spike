@@ -20,6 +20,7 @@ package externalversions
 
 import (
 	"fmt"
+	v1alpha2 "github.com/scothis/stream-spike/pkg/apis/config.istio.io/v1alpha2"
 	v1alpha1 "github.com/scothis/stream-spike/pkg/apis/spike.local/v1alpha1"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
@@ -51,7 +52,11 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=spike.local, Version=v1alpha1
+	// Group=config.istio.io, Version=v1alpha2
+	case v1alpha2.SchemeGroupVersion.WithResource("routerules"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Config().V1alpha2().RouteRules().Informer()}, nil
+
+		// Group=spike.local, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithResource("streams"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Spike().V1alpha1().Streams().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("subscriptions"):
