@@ -1,0 +1,17 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: square
+  labels:
+    app: square
+spec:
+  replicas: 1
+  template:
+    metadata:
+      name: square
+      labels:
+        app: square
+    spec:
+      containers:
+      - image: projectriff/square:0.0.2
+        name: main
