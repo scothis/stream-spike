@@ -1,4 +1,4 @@
-.PHONY: clean codegen codegen-verify build kubectl-apply
+.PHONY: clean codegen codegen-verify build istio-setup kubectl-apply
 
 # This is ONE of the generated files (alongside everything in pkg/client)
 # that serves as make dependency tracking
@@ -55,6 +55,17 @@ hack/vendor: hack/glide.lock
 hack/glide.lock: hack/glide.yaml
 	# Note the absence of -v
 	cd hack && glide up
+
+istio-setup:
+	kubectl apply -f istio-0.7.1/istio-auth.yaml
+	./istio-0.7.1/webhook-create-signed-cert.sh \
+		--service istio-sidecar-injector \
+		--namespace istio-system \
+		--secret sidecar-injector-certs
+	kubectl apply -f istio-0.7.1/istio-sidecar-injector-configmap-release.yaml
+	cat istio-0.7.1/istio-sidecar-injector.yaml | \
+		./istio-0.7.1/webhook-patch-ca-bundle.sh | \
+		kubectl apply -f -
 
 kubectl-apply:
 	kubectl apply -f config/rbac.yaml
