@@ -66,6 +66,7 @@ istio-setup:
 	cat istio-0.7.1/istio-sidecar-injector.yaml | \
 		./istio-0.7.1/webhook-patch-ca-bundle.sh | \
 		kubectl apply -f -
+	kubectl label namespace default istio-injection=enabled
 
 kubectl-apply:
 	kubectl apply -f config/rbac.yaml
