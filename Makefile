@@ -57,6 +57,7 @@ hack/glide.lock: hack/glide.yaml
 	cd hack && glide up
 
 kubectl-apply:
+	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/stream-resource.yaml
 	kubectl apply -f config/subscription-resource.yaml
 	kubectl apply -f config/controller-deployment.yaml
