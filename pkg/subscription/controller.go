@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"time"
 
+	. "github.com/scothis/stream-spike/pkg/names"
+
 	"github.com/golang/glog"
 	istiolisters "github.com/scothis/stream-spike/pkg/client/listers/config.istio.io/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
@@ -266,7 +268,7 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	// Get the routerule with the name specified in Subscription.spec
-	routeruleName := subscriptionRouteRuleName(subscription.ObjectMeta.Name)
+	routeruleName := SubscriptionRouteRuleName(subscription.ObjectMeta.Name)
 	routerule, err := c.routerulesLister.RouteRules(subscription.Namespace).Get(routeruleName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
@@ -374,7 +376,7 @@ func newRouteRule(subscription *spikev1alpha1.Subscription) *istiov1alpha2.Route
 	}
 	return &istiov1alpha2.RouteRule{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      subscriptionRouteRuleName(subscription.ObjectMeta.Name),
+			Name:      SubscriptionRouteRuleName(subscription.ObjectMeta.Name),
 			Namespace: subscription.Namespace,
 			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{
@@ -387,7 +389,7 @@ func newRouteRule(subscription *spikev1alpha1.Subscription) *istiov1alpha2.Route
 		},
 		Spec: istiov1alpha2.RouteRuleSpec{
 			Destination: istiov1alpha2.IstioService{
-				Name: fmt.Sprintf("%s-stream", subscription.Spec.Stream),
+				Name: StreamServiceName(subscription.Spec.Stream),
 			},
 			Route: []istiov1alpha2.DestinationWeight{
 				{
@@ -399,8 +401,4 @@ func newRouteRule(subscription *spikev1alpha1.Subscription) *istiov1alpha2.Route
 			},
 		},
 	}
-}
-
-func subscriptionRouteRuleName(streamName string) string {
-	return fmt.Sprintf("%s-subscription", streamName)
 }

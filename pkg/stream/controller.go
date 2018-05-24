@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"time"
 
+	. "github.com/scothis/stream-spike/pkg/names"
+
 	"github.com/golang/glog"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -265,7 +267,7 @@ func (c *Controller) syncHandler(key string) error {
 	}
 
 	// Get the service with the specified service name
-	serviceName := streamServiceName(name)
+	serviceName := StreamServiceName(name)
 	service, err := c.servicesLister.Services(stream.Namespace).Get(serviceName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
@@ -373,7 +375,7 @@ func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      streamServiceName(stream.ObjectMeta.Name),
+			Name:      StreamServiceName(stream.ObjectMeta.Name),
 			Namespace: stream.Namespace,
 			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{
@@ -392,8 +394,4 @@ func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 			Type: "NodePort",
 		},
 	}
-}
-
-func streamServiceName(streamName string) string {
-	return fmt.Sprintf("%s-stream", streamName)
 }
