@@ -1,16 +1,23 @@
-apiVersion: v1
-kind: Pod
+apiVersion: extensions/v1beta1
+kind: Deployment
 metadata:
   name: hello
   labels:
     app: hello
 spec:
-  containers:
-  - image: spike/hello:0.0.1
-    name: main
-    ports:
-    - containerPort: 8080
-      protocol: TCP
+  replicas: 3
+  template:
+    metadata:
+      name: hello
+      labels:
+        app: hello
+    spec:
+      containers:
+      - image: spike/hello:0.0.1
+        name: main
+        ports:
+        - containerPort: 8080
+          protocol: TCP
 
 ---
 apiVersion: v1
