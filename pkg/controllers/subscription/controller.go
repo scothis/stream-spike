@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"time"
 
-	. "github.com/scothis/stream-spike/pkg/names"
+	. "github.com/scothis/stream-spike/pkg/controllers"
 
 	"github.com/golang/glog"
 	istiolisters "github.com/scothis/stream-spike/pkg/client/listers/config.istio.io/v1alpha2"

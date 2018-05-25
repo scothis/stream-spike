@@ -27,12 +27,12 @@ import (
 	// Uncomment the following line to load the gcp plugin (only required to authenticate against GKE clusters).
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 
-	"github.com/scothis/stream-spike/pkg/broker"
 	clientset "github.com/scothis/stream-spike/pkg/client/clientset/versioned"
 	informers "github.com/scothis/stream-spike/pkg/client/informers/externalversions"
+	"github.com/scothis/stream-spike/pkg/controllers/broker"
+	"github.com/scothis/stream-spike/pkg/controllers/stream"
+	"github.com/scothis/stream-spike/pkg/controllers/subscription"
 	"github.com/scothis/stream-spike/pkg/signals"
-	"github.com/scothis/stream-spike/pkg/stream"
-	"github.com/scothis/stream-spike/pkg/subscription"
 )
 
 var (
