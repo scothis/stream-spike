@@ -27,6 +27,7 @@ import (
 	// Uncomment the following line to load the gcp plugin (only required to authenticate against GKE clusters).
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 
+	"github.com/scothis/stream-spike/pkg/broker"
 	clientset "github.com/scothis/stream-spike/pkg/client/clientset/versioned"
 	informers "github.com/scothis/stream-spike/pkg/client/informers/externalversions"
 	"github.com/scothis/stream-spike/pkg/signals"
@@ -68,6 +69,7 @@ func main() {
 	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
 
 	controllers := []controller{
+		broker.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 		stream.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 		subscription.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 	}
