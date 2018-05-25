@@ -107,6 +107,7 @@ func NewController(
 	// obtain references to shared index informers for the Ingress, Service and Stream
 	// types.
 	ingressInformer := kubeInformerFactory.Extensions().V1beta1().Ingresses()
+	routeruleInformer := streamInformerFactory.Config().V1alpha2().RouteRules()
 	serviceInformer := kubeInformerFactory.Core().V1().Services()
 	streamInformer := streamInformerFactory.Spike().V1alpha1().Streams()
 
@@ -121,16 +122,18 @@ func NewController(
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	controller := &Controller{
-		kubeclientset:   kubeclientset,
-		streamclientset: streamclientset,
-		ingressesLister: ingressInformer.Lister(),
-		ingressesSynced: ingressInformer.Informer().HasSynced,
-		servicesLister:  serviceInformer.Lister(),
-		servicesSynced:  serviceInformer.Informer().HasSynced,
-		streamsLister:   streamInformer.Lister(),
-		streamsSynced:   streamInformer.Informer().HasSynced,
-		workqueue:       workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Streams"),
-		recorder:        recorder,
+		kubeclientset:    kubeclientset,
+		streamclientset:  streamclientset,
+		ingressesLister:  ingressInformer.Lister(),
+		ingressesSynced:  ingressInformer.Informer().HasSynced,
+		routerulesLister: routeruleInformer.Lister(),
+		routerulesSynced: routeruleInformer.Informer().HasSynced,
+		servicesLister:   serviceInformer.Lister(),
+		servicesSynced:   serviceInformer.Informer().HasSynced,
+		streamsLister:    streamInformer.Lister(),
+		streamsSynced:    streamInformer.Informer().HasSynced,
+		workqueue:        workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Streams"),
+		recorder:         recorder,
 	}
 
 	glog.Info("Setting up event handlers")
@@ -345,7 +348,7 @@ func (c *Controller) syncBrokeredStream(stream *spikev1alpha1.Stream) (*istiov1a
 		// If the resource exists, delete it
 		if routerule != nil {
 			// Notify broker of stream removal
-			err = deleteBrokeredStream(routerule.Labels["broker"], stream.Name)
+			err = deleteBrokeredStream(routerule.Labels["broker"], stream)
 			if err != nil {
 				return routerule, err
 			}
@@ -598,12 +601,14 @@ func newIngress(stream *spikev1alpha1.Stream) *extensionsv1beta1.Ingress {
 }
 
 func provisionBrokeredStream(stream *spikev1alpha1.Stream) error {
-	streamName := stream.ObjectMeta.Name
+	streamName := stream.Name
+	namespace := stream.Namespace
 	brokerName := stream.Spec.Broker
 	brokerServiceName := BrokerServiceName(brokerName)
 
 	client := &http.Client{}
-	url := fmt.Sprintf("http://%s/streams/%s", brokerServiceName, streamName)
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local/streams/%s", brokerServiceName, namespace, streamName)
+	fmt.Printf("Create stream at %s\n", url)
 	request, err := http.NewRequest(http.MethodPut, url, strings.NewReader(""))
 	if err != nil {
 		return err
@@ -613,17 +618,20 @@ func provisionBrokeredStream(stream *spikev1alpha1.Stream) error {
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("Unable to provision brokered stream %s on %s")
+		return fmt.Errorf("Unable to provision brokered stream %s on %s", streamName, brokerName)
 	}
 
 	return nil
 }
 
-func deleteBrokeredStream(brokerName string, streamName string) error {
+func deleteBrokeredStream(brokerName string, stream *spikev1alpha1.Stream) error {
+	streamName := stream.Name
+	namespace := stream.Namespace
 	brokerServiceName := BrokerServiceName(brokerName)
 
 	client := &http.Client{}
-	url := fmt.Sprintf("http://%s/streams/%s", brokerServiceName, streamName)
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local/streams/%s", brokerServiceName, namespace, streamName)
+	fmt.Printf("Delete stream at %s\n", url)
 	request, err := http.NewRequest(http.MethodDelete, url, strings.NewReader(""))
 	if err != nil {
 		return err
@@ -633,7 +641,7 @@ func deleteBrokeredStream(brokerName string, streamName string) error {
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("Unable to delete brokered stream %s on %s")
+		return fmt.Errorf("Unable to delete brokered stream %s on %s", streamName, brokerName)
 	}
 
 	return nil

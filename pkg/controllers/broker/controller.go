@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	. "github.com/scothis/stream-spike/pkg/controllers"
 
 	"github.com/golang/glog"
@@ -434,8 +436,13 @@ func newService(broker *spikev1alpha1.Broker) *corev1.Service {
 			},
 		},
 		Spec: corev1.ServiceSpec{
+			Selector: labels,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: 80},
+				{
+					Name:       "http",
+					Port:       80,
+					TargetPort: intstr.FromInt(8080),
+				},
 			},
 		},
 	}
@@ -449,6 +456,11 @@ func newDeployment(broker *spikev1alpha1.Broker) *appsv1.Deployment {
 		"broker": broker.Name,
 	}
 	one := int32(1)
+	container := broker.Spec.Container.DeepCopy()
+	container.Env = append(container.Env, corev1.EnvVar{
+		Name:  "PORT",
+		Value: "8080",
+	})
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      BrokerDeploymentName(broker.ObjectMeta.Name),
@@ -472,7 +484,7 @@ func newDeployment(broker *spikev1alpha1.Broker) *appsv1.Deployment {
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
-						broker.Spec.Container,
+						*container,
 					},
 				},
 			},

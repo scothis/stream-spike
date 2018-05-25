@@ -5,4 +5,4 @@ metadata:
 spec:
   container: 
     name: broker
-    image: busybox
+    image: github.com/scothis/stream-spike/cmd/stub-broker
