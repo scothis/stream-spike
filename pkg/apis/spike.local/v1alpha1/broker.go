@@ -17,6 +17,7 @@
 package v1alpha1
 
 import (
+	kapi "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -25,30 +26,29 @@ import (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:defaulter-gen=true
 
-// Represents the streams.spike.local CRD
-type Stream struct {
+// Represents the brokers.spike.local CRD
+type Broker struct {
 	meta_v1.TypeMeta   `json:",inline"`
 	meta_v1.ObjectMeta `json:"metadata"`
-	Spec               StreamSpec    `json:"spec"`
-	Status             *StreamStatus `json:"status,omitempty"`
+	Spec               BrokerSpec    `json:"spec"`
+	Status             *BrokerStatus `json:"status,omitempty"`
 }
 
-// Spec (what the user wants) for a stream
-type StreamSpec struct {
-
-	// Name of the broker backing this stream (optional)
-	Broker string
+// Spec (what the user wants) for a broker
+type BrokerSpec struct {
+	// Container definition to use for the broker.
+	Container kapi.Container `json:"container"`
 }
 
-// Status (computed) for a stream
-type StreamStatus struct {
+// Status (computed) for a broker
+type BrokerStatus struct {
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Returned in list operations
-type StreamList struct {
+type BrokerList struct {
 	meta_v1.TypeMeta `json:",inline"`
 	meta_v1.ListMeta `json:"metadata"`
-	Items            []Stream `json:"items"`
+	Items            []Broker `json:"items"`
 }

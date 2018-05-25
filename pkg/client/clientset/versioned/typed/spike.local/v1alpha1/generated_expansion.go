@@ -16,6 +16,8 @@
 
 package v1alpha1
 
+type BrokerExpansion interface{}
+
 type StreamExpansion interface{}
 
 type SubscriptionExpansion interface{}

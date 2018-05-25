@@ -25,6 +25,7 @@ import (
 
 type SpikeV1alpha1Interface interface {
 	RESTClient() rest.Interface
+	BrokersGetter
 	StreamsGetter
 	SubscriptionsGetter
 }
@@ -32,6 +33,10 @@ type SpikeV1alpha1Interface interface {
 // SpikeV1alpha1Client is used to interact with features provided by the spike.local group.
 type SpikeV1alpha1Client struct {
 	restClient rest.Interface
+}
+
+func (c *SpikeV1alpha1Client) Brokers(namespace string) BrokerInterface {
+	return newBrokers(c, namespace)
 }
 
 func (c *SpikeV1alpha1Client) Streams(namespace string) StreamInterface {
