@@ -35,9 +35,6 @@ type Stream struct {
 
 // Spec (what the user wants) for a stream
 type StreamSpec struct {
-
-	// When true an ingress is created for the stream's service
-	Ingress *bool `json:"ingress,omitempty"`
 }
 
 // Status (computed) for a stream

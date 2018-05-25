@@ -24,9 +24,11 @@ import (
 
 	"github.com/golang/glog"
 	corev1 "k8s.io/api/core/v1"
+	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubeinformers "k8s.io/client-go/informers"
@@ -34,6 +36,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	extensionslisters "k8s.io/client-go/listers/extensions/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -70,10 +73,12 @@ type Controller struct {
 	// streamclientset is a clientset for our own API group
 	streamclientset clientset.Interface
 
-	servicesLister corelisters.ServiceLister
-	servicesSynced cache.InformerSynced
-	streamsLister  listers.StreamLister
-	streamsSynced  cache.InformerSynced
+	ingressesLister extensionslisters.IngressLister
+	ingressesSynced cache.InformerSynced
+	servicesLister  corelisters.ServiceLister
+	servicesSynced  cache.InformerSynced
+	streamsLister   listers.StreamLister
+	streamsSynced   cache.InformerSynced
 
 	// workqueue is a rate limited work queue. This is used to queue work to be
 	// processed instead of performing it as soon as a change happens. This
@@ -93,8 +98,9 @@ func NewController(
 	kubeInformerFactory kubeinformers.SharedInformerFactory,
 	streamInformerFactory informers.SharedInformerFactory) *Controller {
 
-	// obtain references to shared index informers for the Service and Stream
+	// obtain references to shared index informers for the Ingress, Service and Stream
 	// types.
+	ingressInformer := kubeInformerFactory.Extensions().V1beta1().Ingresses()
 	serviceInformer := kubeInformerFactory.Core().V1().Services()
 	streamInformer := streamInformerFactory.Spike().V1alpha1().Streams()
 
@@ -111,6 +117,8 @@ func NewController(
 	controller := &Controller{
 		kubeclientset:   kubeclientset,
 		streamclientset: streamclientset,
+		ingressesLister: ingressInformer.Lister(),
+		ingressesSynced: ingressInformer.Informer().HasSynced,
 		servicesLister:  serviceInformer.Lister(),
 		servicesSynced:  serviceInformer.Informer().HasSynced,
 		streamsLister:   streamInformer.Lister(),
@@ -164,7 +172,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 
 	// Wait for the caches to be synced before starting workers
 	glog.Info("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.servicesSynced, c.streamsSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.ingressesSynced, c.servicesSynced, c.streamsSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
@@ -266,8 +274,29 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
+	// Sync Service derived from the Stream
+	service, err := c.syncStreamService(stream)
+	if err != nil {
+		return err
+	}
+
+	// Sync Ingress derived from the Stream
+	ingress, err := c.syncStreamIngress(stream)
+	if err != nil {
+		return err
+	}
+
+	// Finally, we update the status block of the Stream resource to reflect the
+	// current state of the world
+	return c.updateStreamStatus(stream, service, ingress)
+
+	c.recorder.Event(stream, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
+	return nil
+}
+
+func (c *Controller) syncStreamService(stream *spikev1alpha1.Stream) (*corev1.Service, error) {
 	// Get the service with the specified service name
-	serviceName := StreamServiceName(name)
+	serviceName := StreamServiceName(stream.ObjectMeta.Name)
 	service, err := c.servicesLister.Services(stream.Namespace).Get(serviceName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
@@ -278,7 +307,7 @@ func (c *Controller) syncHandler(key string) error {
 	// attempt processing again later. This could have been caused by a
 	// temporary network failure, or any other transient reason.
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// If the Service is not controlled by this Stream resource, we should log
@@ -286,21 +315,42 @@ func (c *Controller) syncHandler(key string) error {
 	if !metav1.IsControlledBy(service, stream) {
 		msg := fmt.Sprintf(MessageResourceExists, service.Name)
 		c.recorder.Event(stream, corev1.EventTypeWarning, ErrResourceExists, msg)
-		return fmt.Errorf(msg)
+		return nil, fmt.Errorf(msg)
 	}
 
-	// Finally, we update the status block of the Stream resource to reflect the
-	// current state of the world
-	err = c.updateStreamStatus(stream, service)
-	if err != nil {
-		return err
-	}
-
-	c.recorder.Event(stream, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
-	return nil
+	return service, nil
 }
 
-func (c *Controller) updateStreamStatus(stream *spikev1alpha1.Stream, service *corev1.Service) error {
+func (c *Controller) syncStreamIngress(stream *spikev1alpha1.Stream) (*extensionsv1beta1.Ingress, error) {
+	// TODO make ingress optional
+
+	// Get the ingress with the specified ingress name
+	ingressName := StreamIngressName(stream.ObjectMeta.Name)
+	ingress, err := c.ingressesLister.Ingresses(stream.Namespace).Get(ingressName)
+	// If the resource doesn't exist, we'll create it
+	if errors.IsNotFound(err) {
+		ingress, err = c.kubeclientset.ExtensionsV1beta1().Ingresses(stream.Namespace).Create(newIngress(stream))
+	}
+
+	// If an error occurs during Get/Create, we'll requeue the item so we can
+	// attempt processing again later. This could have been caused by a
+	// temporary network failure, or any other transient reason.
+	if err != nil {
+		return nil, err
+	}
+
+	// If the Ingress is not controlled by this Stream resource, we should log
+	// a warning to the event recorder and return
+	if !metav1.IsControlledBy(ingress, stream) {
+		msg := fmt.Sprintf(MessageResourceExists, ingress.Name)
+		c.recorder.Event(stream, corev1.EventTypeWarning, ErrResourceExists, msg)
+		return nil, fmt.Errorf(msg)
+	}
+
+	return ingress, nil
+}
+
+func (c *Controller) updateStreamStatus(stream *spikev1alpha1.Stream, service *corev1.Service, ingress *extensionsv1beta1.Ingress) error {
 	// NEVER modify objects from the store. It's a read-only, local cache.
 	// You can use DeepCopy() to make a deep copy of original object and modify this copy
 	// Or create a copy manually for better performance
@@ -389,6 +439,53 @@ func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
 				{Name: "http", Port: 80},
+			},
+		},
+	}
+}
+
+// newIngress creates a new Ingress for a Stream resource. It also sets
+// the appropriate OwnerReferences on the resource so handleObject can discover
+// the Stream resource that 'owns' it.
+func newIngress(stream *spikev1alpha1.Stream) *extensionsv1beta1.Ingress {
+	labels := map[string]string{
+		"stream": stream.Name,
+	}
+	annotations := map[string]string{
+		"kubernetes.io/ingress.class": "istio",
+	}
+	return &extensionsv1beta1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        StreamIngressName(stream.ObjectMeta.Name),
+			Namespace:   stream.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(stream, schema.GroupVersionKind{
+					Group:   spikev1alpha1.SchemeGroupVersion.Group,
+					Version: spikev1alpha1.SchemeGroupVersion.Version,
+					Kind:    "Stream",
+				}),
+			},
+		},
+		Spec: extensionsv1beta1.IngressSpec{
+			Rules: []extensionsv1beta1.IngressRule{
+				{
+					// TODO make host name configurable
+					Host: stream.ObjectMeta.Name,
+					IngressRuleValue: extensionsv1beta1.IngressRuleValue{
+						HTTP: &extensionsv1beta1.HTTPIngressRuleValue{
+							Paths: []extensionsv1beta1.HTTPIngressPath{
+								{
+									Backend: extensionsv1beta1.IngressBackend{
+										ServiceName: StreamServiceName(stream.ObjectMeta.Name),
+										ServicePort: intstr.FromString("http"),
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	}

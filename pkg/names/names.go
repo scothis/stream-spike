@@ -18,10 +18,14 @@ package names
 
 import "fmt"
 
-func SubscriptionRouteRuleName(streamName string) string {
-	return fmt.Sprintf("%s-subscription", streamName)
+func StreamIngressName(streamName string) string {
+	return fmt.Sprintf("%s-stream", streamName)
 }
 
 func StreamServiceName(streamName string) string {
 	return fmt.Sprintf("%s-stream", streamName)
+}
+
+func SubscriptionRouteRuleName(streamName string) string {
+	return fmt.Sprintf("%s-subscription", streamName)
 }
