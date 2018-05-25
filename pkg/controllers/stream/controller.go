@@ -18,11 +18,14 @@ package stream
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	. "github.com/scothis/stream-spike/pkg/controllers"
 
 	"github.com/golang/glog"
+	istiolisters "github.com/scothis/stream-spike/pkg/client/listers/config.istio.io/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -46,6 +49,7 @@ import (
 	informers "github.com/scothis/stream-spike/pkg/client/informers/externalversions"
 	listers "github.com/scothis/stream-spike/pkg/client/listers/spike.local/v1alpha1"
 
+	istiov1alpha2 "github.com/scothis/stream-spike/pkg/apis/config.istio.io/v1alpha2"
 	spikev1alpha1 "github.com/scothis/stream-spike/pkg/apis/spike.local/v1alpha1"
 )
 
@@ -73,12 +77,14 @@ type Controller struct {
 	// streamclientset is a clientset for our own API group
 	streamclientset clientset.Interface
 
-	ingressesLister extensionslisters.IngressLister
-	ingressesSynced cache.InformerSynced
-	servicesLister  corelisters.ServiceLister
-	servicesSynced  cache.InformerSynced
-	streamsLister   listers.StreamLister
-	streamsSynced   cache.InformerSynced
+	ingressesLister  extensionslisters.IngressLister
+	ingressesSynced  cache.InformerSynced
+	routerulesLister istiolisters.RouteRuleLister
+	routerulesSynced cache.InformerSynced
+	servicesLister   corelisters.ServiceLister
+	servicesSynced   cache.InformerSynced
+	streamsLister    listers.StreamLister
+	streamsSynced    cache.InformerSynced
 
 	// workqueue is a rate limited work queue. This is used to queue work to be
 	// processed instead of performing it as soon as a change happens. This
@@ -280,6 +286,12 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
+	// Sync RouteRule derived from a brokered Stream
+	brokeredStreamRouteRule, err := c.syncBrokeredStream(stream)
+	if err != nil {
+		return err
+	}
+
 	// Sync Ingress derived from the Stream
 	ingress, err := c.syncStreamIngress(stream)
 	if err != nil {
@@ -288,7 +300,10 @@ func (c *Controller) syncHandler(key string) error {
 
 	// Finally, we update the status block of the Stream resource to reflect the
 	// current state of the world
-	return c.updateStreamStatus(stream, service, ingress)
+	err = c.updateStreamStatus(stream, service, ingress, brokeredStreamRouteRule)
+	if err != nil {
+		return err
+	}
 
 	c.recorder.Event(stream, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
 	return nil
@@ -321,6 +336,60 @@ func (c *Controller) syncStreamService(stream *spikev1alpha1.Stream) (*corev1.Se
 	return service, nil
 }
 
+func (c *Controller) syncBrokeredStream(stream *spikev1alpha1.Stream) (*istiov1alpha2.RouteRule, error) {
+	// Get the RouteRule with the specified Stream name
+	routeruleName := BrokeredStreamRouteRuleName(stream.ObjectMeta.Name)
+	routerule, err := c.routerulesLister.RouteRules(stream.Namespace).Get(routeruleName)
+
+	if stream.Spec.Broker == "" {
+		// If the resource exists, delete it
+		if routerule != nil {
+			// Notify broker of stream removal
+			err = deleteBrokeredStream(routerule.Labels["broker"], stream.Name)
+			if err != nil {
+				return routerule, err
+			}
+
+			// Remove RouteRule
+			err = c.streamclientset.ConfigV1alpha2().RouteRules(stream.Namespace).Delete(routeruleName, nil)
+			if err != nil {
+				return routerule, err
+			}
+		} else {
+			// nothing to do
+			return routerule, nil
+		}
+	}
+
+	// If the resource doesn't exist, we'll create it
+	if errors.IsNotFound(err) {
+		routerule, err = c.streamclientset.ConfigV1alpha2().RouteRules(stream.Namespace).Create(newBrokeredRouteRule(stream))
+	}
+
+	// If an error occurs during Get/Create, we'll requeue the item so we can
+	// attempt processing again later. This could have been caused by a
+	// temporary network failure, or any other transient reason.
+	if err != nil {
+		return nil, err
+	}
+
+	// If the Service is not controlled by this Stream resource, we should log
+	// a warning to the event recorder and return
+	if !metav1.IsControlledBy(routerule, stream) {
+		msg := fmt.Sprintf(MessageResourceExists, routerule.Name)
+		c.recorder.Event(stream, corev1.EventTypeWarning, ErrResourceExists, msg)
+		return nil, fmt.Errorf(msg)
+	}
+
+	// Notify broker of stream
+	err = provisionBrokeredStream(stream)
+	if err != nil {
+		return nil, err
+	}
+
+	return routerule, nil
+}
+
 func (c *Controller) syncStreamIngress(stream *spikev1alpha1.Stream) (*extensionsv1beta1.Ingress, error) {
 	// TODO make ingress optional
 
@@ -350,7 +419,7 @@ func (c *Controller) syncStreamIngress(stream *spikev1alpha1.Stream) (*extension
 	return ingress, nil
 }
 
-func (c *Controller) updateStreamStatus(stream *spikev1alpha1.Stream, service *corev1.Service, ingress *extensionsv1beta1.Ingress) error {
+func (c *Controller) updateStreamStatus(stream *spikev1alpha1.Stream, service *corev1.Service, ingress *extensionsv1beta1.Ingress, brokeredStreamRouteRule *istiov1alpha2.RouteRule) error {
 	// NEVER modify objects from the store. It's a read-only, local cache.
 	// You can use DeepCopy() to make a deep copy of original object and modify this copy
 	// Or create a copy manually for better performance
@@ -444,6 +513,43 @@ func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 	}
 }
 
+// newBrokeredRouteRule creates a new RouteRule for a brokered Stream resource. It also sets
+// the appropriate OwnerReferences on the resource so handleObject can discover
+// the Stream resource that 'owns' it.
+func newBrokeredRouteRule(stream *spikev1alpha1.Stream) *istiov1alpha2.RouteRule {
+	labels := map[string]string{
+		"broker": stream.Spec.Broker,
+		"stream": stream.Name,
+	}
+	return &istiov1alpha2.RouteRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      BrokeredStreamRouteRuleName(stream.Name),
+			Namespace: stream.Namespace,
+			Labels:    labels,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(stream, schema.GroupVersionKind{
+					Group:   spikev1alpha1.SchemeGroupVersion.Group,
+					Version: spikev1alpha1.SchemeGroupVersion.Version,
+					Kind:    "Stream",
+				}),
+			},
+		},
+		Spec: istiov1alpha2.RouteRuleSpec{
+			Destination: istiov1alpha2.IstioService{
+				Name: StreamServiceName(stream.Name),
+			},
+			Route: []istiov1alpha2.DestinationWeight{
+				{
+					Destination: istiov1alpha2.IstioService{
+						Name: BrokerServiceName(stream.Spec.Broker),
+					},
+					Weight: 100,
+				},
+			},
+		},
+	}
+}
+
 // newIngress creates a new Ingress for a Stream resource. It also sets
 // the appropriate OwnerReferences on the resource so handleObject can discover
 // the Stream resource that 'owns' it.
@@ -489,4 +595,46 @@ func newIngress(stream *spikev1alpha1.Stream) *extensionsv1beta1.Ingress {
 			},
 		},
 	}
+}
+
+func provisionBrokeredStream(stream *spikev1alpha1.Stream) error {
+	streamName := stream.ObjectMeta.Name
+	brokerName := stream.Spec.Broker
+	brokerServiceName := BrokerServiceName(brokerName)
+
+	client := &http.Client{}
+	url := fmt.Sprintf("http://%s/streams/%s", brokerServiceName, streamName)
+	request, err := http.NewRequest(http.MethodPut, url, strings.NewReader(""))
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("Unable to provision brokered stream %s on %s")
+	}
+
+	return nil
+}
+
+func deleteBrokeredStream(brokerName string, streamName string) error {
+	brokerServiceName := BrokerServiceName(brokerName)
+
+	client := &http.Client{}
+	url := fmt.Sprintf("http://%s/streams/%s", brokerServiceName, streamName)
+	request, err := http.NewRequest(http.MethodDelete, url, strings.NewReader(""))
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("Unable to delete brokered stream %s on %s")
+	}
+
+	return nil
 }
