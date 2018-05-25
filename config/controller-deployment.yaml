@@ -11,4 +11,4 @@ spec:
     spec:
       containers:
       - name: stream-controller
-        image: scothis/stream-controller:spike
+        image: github.com/scothis/stream-spike/cmd/stream-controller

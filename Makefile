@@ -6,15 +6,9 @@ GENERATED_SOURCE = pkg/apis/spike.local/v1alpha1/zz_generated.deepcopy.go
 
 GO_SOURCES = $(shell find pkg/apis -type f -name '*.go' ! -path $(GENERATED_SOURCE))
 
-PKGS = $(shell go list ./pkg/...)
-
-build: $(GO_SOURCES) vendor
-	go build $(PKGS)
-
 codegen: $(GENERATED_SOURCE)
 
 $(GENERATED_SOURCE): $(GO_SOURCES) hack/vendor vendor
-	# config.istio.io:v1alpha2
 	hack/vendor/k8s.io/code-generator/generate-groups.sh all \
       github.com/scothis/stream-spike/pkg/client \
       github.com/scothis/stream-spike/pkg/apis \
@@ -38,9 +32,6 @@ codegen-verify: hack/vendor vendor
 clean:
 	rm -fR pkg/client
 	rm -f $(GENERATED_SOURCE)
-
-dockerize: $(GO_SOURCES) vendor
-	docker build . -t scothis/stream-controller:spike
 
 vendor: glide.lock
 	glide install -v --force
@@ -72,4 +63,4 @@ kubectl-apply:
 	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/stream-resource.yaml
 	kubectl apply -f config/subscription-resource.yaml
-	kubectl apply -f config/controller-deployment.yaml
+	ko apply -f config/controller-deployment.yaml
