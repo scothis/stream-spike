@@ -388,10 +388,8 @@ func newService(stream *spikev1alpha1.Stream) *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
-				{Port: 80},
+				{Name: "http", Port: 80},
 			},
-			// TODO remove this when an Ingress option is supported
-			Type: "NodePort",
 		},
 	}
 }
