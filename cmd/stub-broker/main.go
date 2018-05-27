@@ -31,22 +31,23 @@ var (
 func main() {
 	m := martini.Classic()
 
+	m.Post("/", func(req *http.Request, res http.ResponseWriter) {
+		fmt.Printf("Recieved request for %s\n", req.Host)
+		res.WriteHeader(http.StatusAccepted)
+	})
+
 	m.Group("/streams", func(r martini.Router) {
 		r.Put("/:stream", func(params martini.Params, res http.ResponseWriter) {
 			stream := params["stream"]
 			fmt.Printf("Create stream %s\n", stream)
 			subscriptions[stream] = make(map[string]struct{})
 			res.WriteHeader(http.StatusAccepted)
-			res.Header().Add("content-type", "text/plain")
-			res.Write([]byte("ok"))
 		})
 		r.Delete("/:stream", func(params martini.Params, res http.ResponseWriter) {
 			stream := params["stream"]
 			fmt.Printf("Delete stream %s\n", stream)
 			delete(subscriptions, stream)
 			res.WriteHeader(http.StatusAccepted)
-			res.Header().Add("content-type", "text/plain")
-			res.Write([]byte("ok"))
 		})
 	})
 

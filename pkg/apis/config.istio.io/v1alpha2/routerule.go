@@ -37,6 +37,7 @@ type RouteRule struct {
 type RouteRuleSpec struct {
 	Destination IstioService        `json:"destination"`
 	Route       []DestinationWeight `json:"route"`
+	Rewrite     HTTPRewrite         `json:"rewrite"`
 }
 
 // IstioService HACK
@@ -50,6 +51,11 @@ type IstioService struct {
 type DestinationWeight struct {
 	Destination IstioService `json:"destination"`
 	Weight      int32        `json:"weight"`
+}
+
+// HTTPRewrite HACK
+type HTTPRewrite struct {
+	Authority string `json:"authority"`
 }
 
 // RouteRuleStatus HACK

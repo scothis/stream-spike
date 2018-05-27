@@ -549,6 +549,9 @@ func newBrokeredRouteRule(stream *spikev1alpha1.Stream) *istiov1alpha2.RouteRule
 					Weight: 100,
 				},
 			},
+			Rewrite: istiov1alpha2.HTTPRewrite{
+				Authority: fmt.Sprintf("%s.%s.streams.cluster.local", stream.Name, stream.Namespace),
+			},
 		},
 	}
 }
