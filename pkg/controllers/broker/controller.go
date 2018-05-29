@@ -18,6 +18,7 @@ package broker
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -344,6 +345,13 @@ func (c *Controller) syncBrokerDeployment(broker *spikev1alpha1.Broker) (*appsv1
 		msg := fmt.Sprintf(MessageResourceExists, deployment.Name)
 		c.recorder.Event(broker, corev1.EventTypeWarning, ErrResourceExists, msg)
 		return nil, fmt.Errorf(msg)
+	}
+
+	// If the Deployment's container spec does not match the Broker's we should update
+	// the Deployment resource.
+	if !reflect.DeepEqual(broker.Spec.Container, deployment.Spec.Template.Spec.Containers[0]) {
+		glog.V(4).Infof("Broker %s container spec updated", broker.Name)
+		deployment, err = c.kubeclientset.AppsV1().Deployments(broker.Namespace).Update(newDeployment(broker))
 	}
 
 	return deployment, nil
