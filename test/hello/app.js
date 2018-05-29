@@ -4,9 +4,20 @@ const os = require('os');
 console.log("server starting...");
 
 var handler = function(request, response) {
-  console.log("received request from " + request.connection.remoteAddress);
+  if (request.method !== 'POST') {
+    response.writeHead(405);
+    response.end();
+    return;
+  }
+  if (request.url !== '/') {
+    response.writeHead(404);
+    response.end();
+    return;
+  }
+  const hostname = os.hostname();
+  console.log(`received request to ${hostname} from ${request.connection.remoteAddress}`);
   response.writeHead(200);
-  response.end("hello from " + os.hostname() + "\n");
+  response.end(`hello from ${hostname}\n`);
 };
 
 var www = http.createServer(handler);

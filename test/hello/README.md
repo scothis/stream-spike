@@ -15,5 +15,5 @@ kubectl apply -f hello.yaml
 ```
 export INGRESS_HOST=$(minikube ip)
 export INGRESS_PORT=$(kubectl get svc istio-ingress -n istio-system -o jsonpath='{.spec.ports[0].nodePort}')
-curl -H "Host: hello" $INGRESS_HOST:$INGRESS_PORT
+curl -X POST -H "Host: hello" $INGRESS_HOST:$INGRESS_PORT
 ```
