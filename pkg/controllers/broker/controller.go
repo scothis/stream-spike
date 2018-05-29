@@ -347,11 +347,12 @@ func (c *Controller) syncBrokerDeployment(broker *spikev1alpha1.Broker) (*appsv1
 		return nil, fmt.Errorf(msg)
 	}
 
-	// If the Deployment's container spec does not match the Broker's we should update
+	// If the Deployment does not match the Broker's proposed Deployment we should update
 	// the Deployment resource.
-	if !reflect.DeepEqual(broker.Spec.Container, deployment.Spec.Template.Spec.Containers[0]) {
+	proposedDeployment := newDeployment(broker)
+	if !reflect.DeepEqual(proposedDeployment.Spec, deployment.Spec) {
 		glog.V(4).Infof("Broker %s container spec updated", broker.Name)
-		deployment, err = c.kubeclientset.AppsV1().Deployments(broker.Namespace).Update(newDeployment(broker))
+		deployment, err = c.kubeclientset.AppsV1().Deployments(broker.Namespace).Update(proposedDeployment)
 
 		if err != nil {
 			return nil, err
@@ -469,10 +470,16 @@ func newDeployment(broker *spikev1alpha1.Broker) *appsv1.Deployment {
 	}
 	one := int32(1)
 	container := broker.Spec.Container.DeepCopy()
-	container.Env = append(container.Env, corev1.EnvVar{
-		Name:  "PORT",
-		Value: "8080",
-	})
+	container.Env = append(container.Env,
+		corev1.EnvVar{
+			Name:  "PORT",
+			Value: "8080",
+		},
+		corev1.EnvVar{
+			Name:  "BROKER_NAME",
+			Value: broker.Name,
+		},
+	)
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      BrokerDeploymentName(broker.ObjectMeta.Name),

@@ -21,31 +21,33 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
-	"sync"
 
 	"github.com/go-martini/martini"
 )
 
 var (
-	subscriptions = sync.Map{}
+	// TODO make thread safe
+	subscriptions  = make(map[string]map[string]struct{})
+	exists         = struct{}{}
+	broker         = os.Getenv("BROKER_NAME")
+	forwardHeaders = []string{
+		"content-type",
+		"x-request-id",
+		"x-b3-traceid",
+		"x-b3-spanid",
+		"x-b3-parentspanid",
+		"x-b3-sampled",
+		"x-b3-flags",
+		"x-ot-span-context",
+	}
 )
-
-type exists interface{}
 
 func splitStreamName(host string) string {
 	chunks := strings.Split(host, ".")
 	stream := chunks[0]
 	return stream
-}
-
-func streamSubscribers(stream string) *sync.Map {
-	subscribersInterface, ok := subscriptions.Load(stream)
-	if !ok {
-		return nil
-	}
-	subscribers := subscribersInterface.(sync.Map)
-	return &subscribers
 }
 
 func main() {
@@ -54,9 +56,9 @@ func main() {
 	m.Post("/", func(req *http.Request, res http.ResponseWriter) {
 		host := req.Host
 		fmt.Printf("Recieved request for %s\n", host)
-		streamName := splitStreamName(host)
-		subscribers := streamSubscribers(streamName)
-		if subscribers == nil {
+		stream := splitStreamName(host)
+		subscribers, ok := subscriptions[stream]
+		if !ok {
 			res.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -69,28 +71,34 @@ func main() {
 
 		res.WriteHeader(http.StatusAccepted)
 		go func() {
+			fmt.Printf("Making subscribed requests for %s\n", stream)
+
 			// make upstream requests
 			client := &http.Client{}
 
-			subscribers.Range(func(key, value interface{}) bool {
-				subscribed, _ := key.(string)
+			for subscribed := range subscribers {
+				go func(subscribed string) {
+					fmt.Printf("Making subscribed request to %s for %s\n", subscribed, stream)
 
-				go func() {
 					url := fmt.Sprintf("http://%s/", subscribed)
 					request, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 					if err != nil {
 						fmt.Printf("Unable to create subscriber request %v", err)
 					}
-					// TODO pass other headers
-					request.Header.Set("content-type", req.Header.Get("content-type"))
+					request.Header.Set("x-broker", broker)
+					request.Header.Set("x-stream", stream)
+					for _, header := range forwardHeaders {
+						if value := req.Header.Get(header); value != "" {
+							fmt.Printf("Forward header %s: %s\n", header, value)
+							request.Header.Set(header, value)
+						}
+					}
 					_, err = client.Do(request)
 					if err != nil {
 						fmt.Printf("Unable to complete subscriber request %v", err)
 					}
-				}()
-
-				return true
-			})
+				}(subscribed)
+			}
 		}()
 	})
 
@@ -98,13 +106,15 @@ func main() {
 		r.Put("", func(params martini.Params, res http.ResponseWriter) {
 			stream := params["stream"]
 			fmt.Printf("Create stream %s\n", stream)
-			_, _ = subscriptions.LoadOrStore(stream, sync.Map{})
+			if _, ok := subscriptions[stream]; !ok {
+				subscriptions[stream] = map[string]struct{}{}
+			}
 			res.WriteHeader(http.StatusAccepted)
 		})
 		r.Delete("", func(params martini.Params, res http.ResponseWriter) {
 			stream := params["stream"]
 			fmt.Printf("Delete stream %s\n", stream)
-			subscriptions.Delete(stream)
+			delete(subscriptions, stream)
 			res.WriteHeader(http.StatusAccepted)
 		})
 
@@ -112,26 +122,26 @@ func main() {
 			r.Put("", func(params martini.Params, res http.ResponseWriter) {
 				stream := params["stream"]
 				subscription := params["subscription"]
-				subscribers := streamSubscribers(stream)
-				if subscribers == nil {
+				subscribers, ok := subscriptions[stream]
+				if !ok {
 					res.WriteHeader(http.StatusNotFound)
 					return
 				}
 				fmt.Printf("Create subscription %s for stream %s\n", subscription, stream)
 				// TODO store subscription params
-				subscribers.Store(subscription, "")
+				subscribers[subscription] = exists
 				res.WriteHeader(http.StatusAccepted)
 			})
 			r.Delete("", func(params martini.Params, res http.ResponseWriter) {
 				stream := params["stream"]
 				subscription := params["subscription"]
-				subscribers := streamSubscribers(stream)
-				if subscribers == nil {
+				subscribers, ok := subscriptions[stream]
+				if !ok {
 					res.WriteHeader(http.StatusNotFound)
 					return
 				}
 				fmt.Printf("Delete subscription %s for stream %s\n", subscription, stream)
-				subscriptions.Delete(subscription)
+				delete(subscribers, subscription)
 				res.WriteHeader(http.StatusAccepted)
 			})
 		})
