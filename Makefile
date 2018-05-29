@@ -60,6 +60,9 @@ istio-setup:
 	kubectl label namespace default istio-injection=enabled
 
 kubectl-apply:
+ifeq ($(KO_DOCKER_REPO)$(KO_FLAGS),)
+override KO_FLAGS = -L
+endif
 	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/stream-resource.yaml
 	kubectl apply -f config/subscription-resource.yaml
