@@ -57,6 +57,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Config().V1alpha2().RouteRules().Informer()}, nil
 
 		// Group=spike.local, Version=v1alpha1
+	case v1alpha1.SchemeGroupVersion.WithResource("brokers"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Spike().V1alpha1().Brokers().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("streams"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Spike().V1alpha1().Streams().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("subscriptions"):

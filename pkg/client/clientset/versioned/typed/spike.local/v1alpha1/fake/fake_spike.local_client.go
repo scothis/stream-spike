@@ -26,6 +26,10 @@ type FakeSpikeV1alpha1 struct {
 	*testing.Fake
 }
 
+func (c *FakeSpikeV1alpha1) Brokers(namespace string) v1alpha1.BrokerInterface {
+	return &FakeBrokers{c, namespace}
+}
+
 func (c *FakeSpikeV1alpha1) Streams(namespace string) v1alpha1.StreamInterface {
 	return &FakeStreams{c, namespace}
 }

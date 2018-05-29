@@ -18,6 +18,14 @@
 
 package v1alpha1
 
+// BrokerListerExpansion allows custom methods to be added to
+// BrokerLister.
+type BrokerListerExpansion interface{}
+
+// BrokerNamespaceListerExpansion allows custom methods to be added to
+// BrokerNamespaceLister.
+type BrokerNamespaceListerExpansion interface{}
+
 // StreamListerExpansion allows custom methods to be added to
 // StreamLister.
 type StreamListerExpansion interface{}

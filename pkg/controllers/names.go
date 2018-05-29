@@ -14,9 +14,21 @@
  * limitations under the License.
  */
 
-package names
+package controllers
 
 import "fmt"
+
+func BrokerDeploymentName(brokerName string) string {
+	return fmt.Sprintf("%s-broker", brokerName)
+}
+
+func BrokerServiceName(brokerName string) string {
+	return fmt.Sprintf("%s-broker", brokerName)
+}
+
+func BrokeredStreamRouteRuleName(streamName string) string {
+	return fmt.Sprintf("%s-stream", streamName)
+}
 
 func StreamIngressName(streamName string) string {
 	return fmt.Sprintf("%s-stream", streamName)
@@ -26,6 +38,6 @@ func StreamServiceName(streamName string) string {
 	return fmt.Sprintf("%s-stream", streamName)
 }
 
-func SubscriptionRouteRuleName(streamName string) string {
-	return fmt.Sprintf("%s-subscription", streamName)
+func SubscriptionRouteRuleName(subscriptionName string) string {
+	return fmt.Sprintf("%s-subscription", subscriptionName)
 }

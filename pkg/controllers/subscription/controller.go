@@ -18,9 +18,11 @@ package subscription
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
-	. "github.com/scothis/stream-spike/pkg/names"
+	. "github.com/scothis/stream-spike/pkg/controllers"
 
 	"github.com/golang/glog"
 	istiolisters "github.com/scothis/stream-spike/pkg/client/listers/config.istio.io/v1alpha2"
@@ -73,6 +75,8 @@ type Controller struct {
 
 	routerulesLister    istiolisters.RouteRuleLister
 	routerulesSynced    cache.InformerSynced
+	streamsLister       listers.StreamLister
+	streamsSynced       cache.InformerSynced
 	subscriptionsLister listers.SubscriptionLister
 	subscriptionsSynced cache.InformerSynced
 
@@ -97,6 +101,7 @@ func NewController(
 	// obtain references to shared index informers for the RouteRule and Subscription
 	// types.
 	routeruleInformer := subscriptionInformerFactory.Config().V1alpha2().RouteRules()
+	streamInformer := subscriptionInformerFactory.Spike().V1alpha1().Streams()
 	subscriptionInformer := subscriptionInformerFactory.Spike().V1alpha1().Subscriptions()
 
 	// Create event broadcaster
@@ -114,6 +119,8 @@ func NewController(
 		subscriptionclientset: subscriptionclientset,
 		routerulesLister:      routeruleInformer.Lister(),
 		routerulesSynced:      routeruleInformer.Informer().HasSynced,
+		streamsLister:         streamInformer.Lister(),
+		streamsSynced:         streamInformer.Informer().HasSynced,
 		subscriptionsLister:   subscriptionInformer.Lister(),
 		subscriptionsSynced:   subscriptionInformer.Informer().HasSynced,
 		workqueue:             workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Subscriptions"),
@@ -267,6 +274,35 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
+	stream, err := c.streamsLister.Streams(namespace).Get(subscription.Spec.Stream)
+
+	var brokerlessRouterule *istiov1alpha2.RouteRule
+	if stream.Spec.Broker != "" {
+		// TODO handle unsubscribe
+		err = subscribeBrokeredStream(stream.Spec.Broker, subscription)
+		if err != nil {
+			return err
+		}
+	} else {
+		brokerlessRouterule, err = c.syncBrokerlessRouteRule(subscription)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Finally, we update the status block of the Subscription resource to reflect the
+	// current state of the world
+	err = c.updateSubscriptionStatus(subscription, brokerlessRouterule)
+	if err != nil {
+		return err
+	}
+
+	c.recorder.Event(subscription, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
+	return nil
+}
+
+func (c *Controller) syncBrokerlessRouteRule(subscription *spikev1alpha1.Subscription) (*istiov1alpha2.RouteRule, error) {
+
 	// Get the routerule with the name specified in Subscription.spec
 	routeruleName := SubscriptionRouteRuleName(subscription.ObjectMeta.Name)
 	routerule, err := c.routerulesLister.RouteRules(subscription.Namespace).Get(routeruleName)
@@ -279,7 +315,7 @@ func (c *Controller) syncHandler(key string) error {
 	// attempt processing again later. This could have been caused by a
 	// temporary network failure, or any other transient reason.
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// If the RouteRule is not controlled by this Subscription resource, we should log
@@ -287,21 +323,13 @@ func (c *Controller) syncHandler(key string) error {
 	if !metav1.IsControlledBy(routerule, subscription) {
 		msg := fmt.Sprintf(MessageResourceExists, routerule.Name)
 		c.recorder.Event(subscription, corev1.EventTypeWarning, ErrResourceExists, msg)
-		return fmt.Errorf(msg)
+		return nil, fmt.Errorf(msg)
 	}
 
-	// Finally, we update the status block of the Subscription resource to reflect the
-	// current state of the world
-	err = c.updateSubscriptionStatus(subscription, routerule)
-	if err != nil {
-		return err
-	}
-
-	c.recorder.Event(subscription, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
-	return nil
+	return routerule, nil
 }
 
-func (c *Controller) updateSubscriptionStatus(subscription *spikev1alpha1.Subscription, routerule *istiov1alpha2.RouteRule) error {
+func (c *Controller) updateSubscriptionStatus(subscription *spikev1alpha1.Subscription, brokerlessRouterule *istiov1alpha2.RouteRule) error {
 	// NEVER modify objects from the store. It's a read-only, local cache.
 	// You can use DeepCopy() to make a deep copy of original object and modify this copy
 	// Or create a copy manually for better performance
@@ -401,4 +429,53 @@ func newRouteRule(subscription *spikev1alpha1.Subscription) *istiov1alpha2.Route
 			},
 		},
 	}
+}
+
+func subscribeBrokeredStream(brokerName string, subscription *spikev1alpha1.Subscription) error {
+	streamName := subscription.Spec.Stream
+	subscriberName := subscription.Spec.Subscriber
+	namespace := subscription.Namespace
+	brokerServiceName := BrokerServiceName(brokerName)
+
+	client := &http.Client{}
+	// TODO pass subscriber and params in body, url should contain subscription name
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local/streams/%s/subscriptions/%s", brokerServiceName, namespace, streamName, subscriberName)
+	fmt.Printf("Subscribe %s to stream %s at %s\n", subscriberName, streamName, url)
+	request, err := http.NewRequest(http.MethodPut, url, strings.NewReader(""))
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("Unable to subscribe %s to brokered stream %s on %s", subscriberName, streamName, brokerName)
+	}
+
+	return nil
+}
+
+func unsubscribeBrokeredStream(brokerName string, subscription *spikev1alpha1.Subscription) error {
+	streamName := subscription.Spec.Stream
+	subscriberName := subscription.Spec.Subscriber
+	namespace := subscription.Namespace
+	brokerServiceName := BrokerServiceName(brokerName)
+
+	client := &http.Client{}
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local/streams/%s/subscriptions/%s", brokerServiceName, namespace, streamName, subscriberName)
+	fmt.Printf("Unsubscribe %s from stream %s at %s\n", subscriberName, streamName, url)
+	request, err := http.NewRequest(http.MethodDelete, url, strings.NewReader(""))
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("Unable to unsubscribe %s from brokered stream %s on %s", subscriberName, streamName, brokerName)
+	}
+
+	return nil
 }

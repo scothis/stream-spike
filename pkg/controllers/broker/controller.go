@@ -14,29 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package stream
+package broker
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
-	. "github.com/scothis/stream-spike/pkg/names"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
+	. "github.com/scothis/stream-spike/pkg/controllers"
 
 	"github.com/golang/glog"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
-	extensionslisters "k8s.io/client-go/listers/extensions/v1beta1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -49,36 +51,36 @@ import (
 	spikev1alpha1 "github.com/scothis/stream-spike/pkg/apis/spike.local/v1alpha1"
 )
 
-const controllerAgentName = "stream-controller"
+const controllerAgentName = "broker-controller"
 
 const (
-	// SuccessSynced is used as part of the Event 'reason' when a Stream is synced
+	// SuccessSynced is used as part of the Event 'reason' when a Broker is synced
 	SuccessSynced = "Synced"
-	// ErrResourceExists is used as part of the Event 'reason' when a Stream fails
+	// ErrResourceExists is used as part of the Event 'reason' when a Broker fails
 	// to sync due to a Service of the same name already existing.
 	ErrResourceExists = "ErrResourceExists"
 
 	// MessageResourceExists is the message used for Events when a resource
 	// fails to sync due to a Service already existing
-	MessageResourceExists = "Resource %q already exists and is not managed by Stream"
-	// MessageResourceSynced is the message used for an Event fired when a Stream
+	MessageResourceExists = "Resource %q already exists and is not managed by Broker"
+	// MessageResourceSynced is the message used for an Event fired when a Broker
 	// is synced successfully
-	MessageResourceSynced = "Stream synced successfully"
+	MessageResourceSynced = "Broker synced successfully"
 )
 
-// Controller is the controller implementation for Stream resources
+// Controller is the controller implementation for Broker resources
 type Controller struct {
 	// kubeclientset is a standard kubernetes clientset
 	kubeclientset kubernetes.Interface
-	// streamclientset is a clientset for our own API group
-	streamclientset clientset.Interface
+	// brokerclientset is a clientset for our own API group
+	brokerclientset clientset.Interface
 
-	ingressesLister extensionslisters.IngressLister
-	ingressesSynced cache.InformerSynced
-	servicesLister  corelisters.ServiceLister
-	servicesSynced  cache.InformerSynced
-	streamsLister   listers.StreamLister
-	streamsSynced   cache.InformerSynced
+	deploymentsLister appslisters.DeploymentLister
+	deploymentsSynced cache.InformerSynced
+	servicesLister    corelisters.ServiceLister
+	servicesSynced    cache.InformerSynced
+	brokersLister     listers.BrokerLister
+	brokersSynced     cache.InformerSynced
 
 	// workqueue is a rate limited work queue. This is used to queue work to be
 	// processed instead of performing it as soon as a change happens. This
@@ -91,22 +93,22 @@ type Controller struct {
 	recorder record.EventRecorder
 }
 
-// NewController returns a new stream controller
+// NewController returns a new broker controller
 func NewController(
 	kubeclientset kubernetes.Interface,
-	streamclientset clientset.Interface,
+	brokerclientset clientset.Interface,
 	kubeInformerFactory kubeinformers.SharedInformerFactory,
-	streamInformerFactory informers.SharedInformerFactory) *Controller {
+	brokerInformerFactory informers.SharedInformerFactory) *Controller {
 
-	// obtain references to shared index informers for the Ingress, Service and Stream
+	// obtain references to shared index informers for the Broker, Deployment and Service
 	// types.
-	ingressInformer := kubeInformerFactory.Extensions().V1beta1().Ingresses()
+	brokerInformer := brokerInformerFactory.Spike().V1alpha1().Brokers()
+	deploymentInformer := kubeInformerFactory.Apps().V1().Deployments()
 	serviceInformer := kubeInformerFactory.Core().V1().Services()
-	streamInformer := streamInformerFactory.Spike().V1alpha1().Streams()
 
 	// Create event broadcaster
-	// Add stream-controller types to the default Kubernetes Scheme so Events can be
-	// logged for stream-controller types.
+	// Add broker-controller types to the default Kubernetes Scheme so Events can be
+	// logged for broker-controller types.
 	streamscheme.AddToScheme(scheme.Scheme)
 	glog.V(4).Info("Creating event broadcaster")
 	eventBroadcaster := record.NewBroadcaster()
@@ -115,29 +117,29 @@ func NewController(
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	controller := &Controller{
-		kubeclientset:   kubeclientset,
-		streamclientset: streamclientset,
-		ingressesLister: ingressInformer.Lister(),
-		ingressesSynced: ingressInformer.Informer().HasSynced,
-		servicesLister:  serviceInformer.Lister(),
-		servicesSynced:  serviceInformer.Informer().HasSynced,
-		streamsLister:   streamInformer.Lister(),
-		streamsSynced:   streamInformer.Informer().HasSynced,
-		workqueue:       workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Streams"),
-		recorder:        recorder,
+		kubeclientset:     kubeclientset,
+		brokerclientset:   brokerclientset,
+		deploymentsLister: deploymentInformer.Lister(),
+		deploymentsSynced: deploymentInformer.Informer().HasSynced,
+		servicesLister:    serviceInformer.Lister(),
+		servicesSynced:    serviceInformer.Informer().HasSynced,
+		brokersLister:     brokerInformer.Lister(),
+		brokersSynced:     brokerInformer.Informer().HasSynced,
+		workqueue:         workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "Brokers"),
+		recorder:          recorder,
 	}
 
 	glog.Info("Setting up event handlers")
-	// Set up an event handler for when Stream resources change
-	streamInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: controller.enqueueStream,
+	// Set up an event handler for when Broker resources change
+	brokerInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: controller.enqueueBroker,
 		UpdateFunc: func(old, new interface{}) {
-			controller.enqueueStream(new)
+			controller.enqueueBroker(new)
 		},
 	})
 	// Set up an event handler for when Service resources change. This
 	// handler will lookup the owner of the given Service, and if it is
-	// owned by a Stream resource will enqueue that Stream resource for
+	// owned by a Broker resource will enqueue that Broker resource for
 	// processing. This way, we don't need to implement custom logic for
 	// handling Service resources. More info on this pattern:
 	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
@@ -168,16 +170,16 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 	defer c.workqueue.ShutDown()
 
 	// Start the informer factories to begin populating the informer caches
-	glog.Info("Starting Stream controller")
+	glog.Info("Starting Broker controller")
 
 	// Wait for the caches to be synced before starting workers
 	glog.Info("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.ingressesSynced, c.servicesSynced, c.streamsSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.deploymentsSynced, c.servicesSynced, c.brokersSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
 	glog.Info("Starting workers")
-	// Launch two workers to process Stream resources
+	// Launch two workers to process Broker resources
 	for i := 0; i < threadiness; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
@@ -231,7 +233,7 @@ func (c *Controller) processNextWorkItem() bool {
 			return nil
 		}
 		// Run the syncHandler, passing it the namespace/name string of the
-		// Stream resource to be synced.
+		// Broker resource to be synced.
 		if err := c.syncHandler(key); err != nil {
 			return fmt.Errorf("error syncing '%s': %s", key, err.Error())
 		}
@@ -251,7 +253,7 @@ func (c *Controller) processNextWorkItem() bool {
 }
 
 // syncHandler compares the actual state with the desired, and attempts to
-// converge the two. It then updates the Status block of the Stream resource
+// converge the two. It then updates the Status block of the Broker resource
 // with the current status of the resource.
 func (c *Controller) syncHandler(key string) error {
 	// Convert the namespace/name string into a distinct namespace and name
@@ -261,46 +263,46 @@ func (c *Controller) syncHandler(key string) error {
 		return nil
 	}
 
-	// Get the Stream resource with this namespace/name
-	stream, err := c.streamsLister.Streams(namespace).Get(name)
+	// Get the Broker resource with this namespace/name
+	broker, err := c.brokersLister.Brokers(namespace).Get(name)
 	if err != nil {
-		// The Stream resource may no longer exist, in which case we stop
+		// The Broker resource may no longer exist, in which case we stop
 		// processing.
 		if errors.IsNotFound(err) {
-			runtime.HandleError(fmt.Errorf("stream '%s' in work queue no longer exists", key))
+			runtime.HandleError(fmt.Errorf("broker '%s' in work queue no longer exists", key))
 			return nil
 		}
 
 		return err
 	}
 
-	// Sync Service derived from the Stream
-	service, err := c.syncStreamService(stream)
+	// Sync Service derived from the Broker
+	service, err := c.syncBrokerService(broker)
 	if err != nil {
 		return err
 	}
 
-	// Sync Ingress derived from the Stream
-	ingress, err := c.syncStreamIngress(stream)
+	// Sync Deployment derived from the Broker
+	deployment, err := c.syncBrokerDeployment(broker)
 	if err != nil {
 		return err
 	}
 
-	// Finally, we update the status block of the Stream resource to reflect the
+	// Finally, we update the status block of the Broker resource to reflect the
 	// current state of the world
-	return c.updateStreamStatus(stream, service, ingress)
+	return c.updateBrokerStatus(broker, service, deployment)
 
-	c.recorder.Event(stream, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
+	c.recorder.Event(broker, corev1.EventTypeNormal, SuccessSynced, MessageResourceSynced)
 	return nil
 }
 
-func (c *Controller) syncStreamService(stream *spikev1alpha1.Stream) (*corev1.Service, error) {
+func (c *Controller) syncBrokerService(broker *spikev1alpha1.Broker) (*corev1.Service, error) {
 	// Get the service with the specified service name
-	serviceName := StreamServiceName(stream.ObjectMeta.Name)
-	service, err := c.servicesLister.Services(stream.Namespace).Get(serviceName)
+	serviceName := BrokerServiceName(broker.ObjectMeta.Name)
+	service, err := c.servicesLister.Services(broker.Namespace).Get(serviceName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
-		service, err = c.kubeclientset.CoreV1().Services(stream.Namespace).Create(newService(stream))
+		service, err = c.kubeclientset.CoreV1().Services(broker.Namespace).Create(newService(broker))
 	}
 
 	// If an error occurs during Get/Create, we'll requeue the item so we can
@@ -310,26 +312,24 @@ func (c *Controller) syncStreamService(stream *spikev1alpha1.Stream) (*corev1.Se
 		return nil, err
 	}
 
-	// If the Service is not controlled by this Stream resource, we should log
+	// If the Service is not controlled by this Broker resource, we should log
 	// a warning to the event recorder and return
-	if !metav1.IsControlledBy(service, stream) {
+	if !metav1.IsControlledBy(service, broker) {
 		msg := fmt.Sprintf(MessageResourceExists, service.Name)
-		c.recorder.Event(stream, corev1.EventTypeWarning, ErrResourceExists, msg)
+		c.recorder.Event(broker, corev1.EventTypeWarning, ErrResourceExists, msg)
 		return nil, fmt.Errorf(msg)
 	}
 
 	return service, nil
 }
 
-func (c *Controller) syncStreamIngress(stream *spikev1alpha1.Stream) (*extensionsv1beta1.Ingress, error) {
-	// TODO make ingress optional
-
-	// Get the ingress with the specified ingress name
-	ingressName := StreamIngressName(stream.ObjectMeta.Name)
-	ingress, err := c.ingressesLister.Ingresses(stream.Namespace).Get(ingressName)
+func (c *Controller) syncBrokerDeployment(broker *spikev1alpha1.Broker) (*appsv1.Deployment, error) {
+	// Get the deployment with the specified deployment name
+	deploymentName := BrokerDeploymentName(broker.ObjectMeta.Name)
+	deployment, err := c.deploymentsLister.Deployments(broker.Namespace).Get(deploymentName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
-		ingress, err = c.kubeclientset.ExtensionsV1beta1().Ingresses(stream.Namespace).Create(newIngress(stream))
+		deployment, err = c.kubeclientset.AppsV1().Deployments(broker.Namespace).Create(newDeployment(broker))
 	}
 
 	// If an error occurs during Get/Create, we'll requeue the item so we can
@@ -339,34 +339,46 @@ func (c *Controller) syncStreamIngress(stream *spikev1alpha1.Stream) (*extension
 		return nil, err
 	}
 
-	// If the Ingress is not controlled by this Stream resource, we should log
+	// If the Deployment is not controlled by this Broker resource, we should log
 	// a warning to the event recorder and return
-	if !metav1.IsControlledBy(ingress, stream) {
-		msg := fmt.Sprintf(MessageResourceExists, ingress.Name)
-		c.recorder.Event(stream, corev1.EventTypeWarning, ErrResourceExists, msg)
+	if !metav1.IsControlledBy(deployment, broker) {
+		msg := fmt.Sprintf(MessageResourceExists, deployment.Name)
+		c.recorder.Event(broker, corev1.EventTypeWarning, ErrResourceExists, msg)
 		return nil, fmt.Errorf(msg)
 	}
 
-	return ingress, nil
+	// If the Deployment does not match the Broker's proposed Deployment we should update
+	// the Deployment resource.
+	proposedDeployment := newDeployment(broker)
+	if !reflect.DeepEqual(proposedDeployment.Spec, deployment.Spec) {
+		glog.V(4).Infof("Broker %s container spec updated", broker.Name)
+		deployment, err = c.kubeclientset.AppsV1().Deployments(broker.Namespace).Update(proposedDeployment)
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return deployment, nil
 }
 
-func (c *Controller) updateStreamStatus(stream *spikev1alpha1.Stream, service *corev1.Service, ingress *extensionsv1beta1.Ingress) error {
+func (c *Controller) updateBrokerStatus(broker *spikev1alpha1.Broker, service *corev1.Service, deployment *appsv1.Deployment) error {
 	// NEVER modify objects from the store. It's a read-only, local cache.
 	// You can use DeepCopy() to make a deep copy of original object and modify this copy
 	// Or create a copy manually for better performance
-	streamCopy := stream.DeepCopy()
+	brokerCopy := broker.DeepCopy()
 	// If the CustomResourceSubresources feature gate is not enabled,
-	// we must use Update instead of UpdateStatus to update the Status block of the Stream resource.
+	// we must use Update instead of UpdateStatus to update the Status block of the Broker resource.
 	// UpdateStatus will not allow changes to the Spec of the resource,
 	// which is ideal for ensuring nothing other than resource status has been updated.
-	_, err := c.streamclientset.SpikeV1alpha1().Streams(stream.Namespace).Update(streamCopy)
+	_, err := c.brokerclientset.SpikeV1alpha1().Brokers(broker.Namespace).Update(brokerCopy)
 	return err
 }
 
-// enqueueStream takes a Stream resource and converts it into a namespace/name
+// enqueueBroker takes a Broker resource and converts it into a namespace/name
 // string which is then put onto the work queue. This method should *not* be
-// passed resources of any type other than Stream.
-func (c *Controller) enqueueStream(obj interface{}) {
+// passed resources of any type other than Broker.
+func (c *Controller) enqueueBroker(obj interface{}) {
 	var key string
 	var err error
 	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
@@ -377,9 +389,9 @@ func (c *Controller) enqueueStream(obj interface{}) {
 }
 
 // handleObject will take any resource implementing metav1.Object and attempt
-// to find the Stream resource that 'owns' it. It does this by looking at the
+// to find the Broker resource that 'owns' it. It does this by looking at the
 // objects metadata.ownerReferences field for an appropriate OwnerReference.
-// It then enqueues that Stream resource to be processed. If the object does not
+// It then enqueues that Broker resource to be processed. If the object does not
 // have an appropriate OwnerReference, it will simply be skipped.
 func (c *Controller) handleObject(obj interface{}) {
 	var object metav1.Object
@@ -399,91 +411,99 @@ func (c *Controller) handleObject(obj interface{}) {
 	}
 	glog.V(4).Infof("Processing object: %s", object.GetName())
 	if ownerRef := metav1.GetControllerOf(object); ownerRef != nil {
-		// If this object is not owned by a Stream, we should not do anything more
+		// If this object is not owned by a Broker, we should not do anything more
 		// with it.
-		if ownerRef.Kind != "Stream" {
+		if ownerRef.Kind != "Broker" {
 			return
 		}
 
-		stream, err := c.streamsLister.Streams(object.GetNamespace()).Get(ownerRef.Name)
+		broker, err := c.brokersLister.Brokers(object.GetNamespace()).Get(ownerRef.Name)
 		if err != nil {
-			glog.V(4).Infof("ignoring orphaned object '%s' of stream '%s'", object.GetSelfLink(), ownerRef.Name)
+			glog.V(4).Infof("ignoring orphaned object '%s' of broker '%s'", object.GetSelfLink(), ownerRef.Name)
 			return
 		}
 
-		c.enqueueStream(stream)
+		c.enqueueBroker(broker)
 		return
 	}
 }
 
-// newService creates a new Service for a Stream resource. It also sets
+// newService creates a new Service for a Broker resource. It also sets
 // the appropriate OwnerReferences on the resource so handleObject can discover
-// the Stream resource that 'owns' it.
-func newService(stream *spikev1alpha1.Stream) *corev1.Service {
+// the Broker resource that 'owns' it.
+func newService(broker *spikev1alpha1.Broker) *corev1.Service {
 	labels := map[string]string{
-		"stream": stream.Name,
+		"broker": broker.Name,
 	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      StreamServiceName(stream.ObjectMeta.Name),
-			Namespace: stream.Namespace,
+			Name:      BrokerServiceName(broker.ObjectMeta.Name),
+			Namespace: broker.Namespace,
 			Labels:    labels,
 			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(stream, schema.GroupVersionKind{
+				*metav1.NewControllerRef(broker, schema.GroupVersionKind{
 					Group:   spikev1alpha1.SchemeGroupVersion.Group,
 					Version: spikev1alpha1.SchemeGroupVersion.Version,
-					Kind:    "Stream",
+					Kind:    "Broker",
 				}),
 			},
 		},
 		Spec: corev1.ServiceSpec{
+			Selector: labels,
 			Ports: []corev1.ServicePort{
-				{Name: "http", Port: 80},
+				{
+					Name:       "http",
+					Port:       80,
+					TargetPort: intstr.FromInt(8080),
+				},
 			},
 		},
 	}
 }
 
-// newIngress creates a new Ingress for a Stream resource. It also sets
+// newDeployment creates a new Deployment for a Broker resource. It also sets
 // the appropriate OwnerReferences on the resource so handleObject can discover
-// the Stream resource that 'owns' it.
-func newIngress(stream *spikev1alpha1.Stream) *extensionsv1beta1.Ingress {
+// the Broker resource that 'owns' it.
+func newDeployment(broker *spikev1alpha1.Broker) *appsv1.Deployment {
 	labels := map[string]string{
-		"stream": stream.Name,
+		"broker": broker.Name,
 	}
-	annotations := map[string]string{
-		"kubernetes.io/ingress.class": "istio",
-	}
-	return &extensionsv1beta1.Ingress{
+	one := int32(1)
+	container := broker.Spec.Container.DeepCopy()
+	container.Env = append(container.Env,
+		corev1.EnvVar{
+			Name:  "PORT",
+			Value: "8080",
+		},
+		corev1.EnvVar{
+			Name:  "BROKER_NAME",
+			Value: broker.Name,
+		},
+	)
+	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        StreamIngressName(stream.ObjectMeta.Name),
-			Namespace:   stream.Namespace,
-			Labels:      labels,
-			Annotations: annotations,
+			Name:      BrokerDeploymentName(broker.ObjectMeta.Name),
+			Namespace: broker.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(stream, schema.GroupVersionKind{
+				*metav1.NewControllerRef(broker, schema.GroupVersionKind{
 					Group:   spikev1alpha1.SchemeGroupVersion.Group,
 					Version: spikev1alpha1.SchemeGroupVersion.Version,
-					Kind:    "Stream",
+					Kind:    "Broker",
 				}),
 			},
 		},
-		Spec: extensionsv1beta1.IngressSpec{
-			Rules: []extensionsv1beta1.IngressRule{
-				{
-					// TODO make host name configurable
-					Host: stream.ObjectMeta.Name,
-					IngressRuleValue: extensionsv1beta1.IngressRuleValue{
-						HTTP: &extensionsv1beta1.HTTPIngressRuleValue{
-							Paths: []extensionsv1beta1.HTTPIngressPath{
-								{
-									Backend: extensionsv1beta1.IngressBackend{
-										ServiceName: StreamServiceName(stream.ObjectMeta.Name),
-										ServicePort: intstr.FromString("http"),
-									},
-								},
-							},
-						},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &one,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						*container,
 					},
 				},
 			},

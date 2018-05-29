@@ -29,9 +29,10 @@ import (
 
 	clientset "github.com/scothis/stream-spike/pkg/client/clientset/versioned"
 	informers "github.com/scothis/stream-spike/pkg/client/informers/externalversions"
+	"github.com/scothis/stream-spike/pkg/controllers/broker"
+	"github.com/scothis/stream-spike/pkg/controllers/stream"
+	"github.com/scothis/stream-spike/pkg/controllers/subscription"
 	"github.com/scothis/stream-spike/pkg/signals"
-	"github.com/scothis/stream-spike/pkg/stream"
-	"github.com/scothis/stream-spike/pkg/subscription"
 )
 
 var (
@@ -68,6 +69,7 @@ func main() {
 	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
 
 	controllers := []controller{
+		broker.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 		stream.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 		subscription.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory),
 	}

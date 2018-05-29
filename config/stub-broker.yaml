@@ -1,0 +1,8 @@
+apiVersion: spike.local/v1alpha1
+kind: Broker
+metadata:
+  name: stub
+spec:
+  container: 
+    name: broker
+    image: github.com/scothis/stream-spike/cmd/stub-broker
