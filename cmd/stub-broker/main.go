@@ -89,7 +89,6 @@ func main() {
 					request.Header.Set("x-stream", stream)
 					for _, header := range forwardHeaders {
 						if value := req.Header.Get(header); value != "" {
-							fmt.Printf("Forward header %s: %s\n", header, value)
 							request.Header.Set(header, value)
 						}
 					}
