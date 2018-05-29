@@ -59,6 +59,9 @@ istio-setup:
 		kubectl apply -f -
 	kubectl label namespace default istio-injection=enabled
 
+istio-tracing:
+	kubectl apply -f istio-0.7.1/addons/zipkin.yaml
+
 kubectl-apply:
 	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/stream-resource.yaml
