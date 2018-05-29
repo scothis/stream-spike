@@ -352,6 +352,10 @@ func (c *Controller) syncBrokerDeployment(broker *spikev1alpha1.Broker) (*appsv1
 	if !reflect.DeepEqual(broker.Spec.Container, deployment.Spec.Template.Spec.Containers[0]) {
 		glog.V(4).Infof("Broker %s container spec updated", broker.Name)
 		deployment, err = c.kubeclientset.AppsV1().Deployments(broker.Namespace).Update(newDeployment(broker))
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return deployment, nil
