@@ -67,4 +67,4 @@ kubectl-apply:
 	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/stream-resource.yaml
 	kubectl apply -f config/subscription-resource.yaml
-	ko apply -L -f config/controller-deployment.yaml
+	ko apply -f config/controller-deployment.yaml
