@@ -1,0 +1,15 @@
+apiVersion: spike.local/v1alpha1
+kind: Stream
+metadata:
+  name: square
+spec:
+  broker: stub
+
+---
+apiVersion: spike.local/v1alpha1
+kind: Subscription
+metadata:
+  name: square
+spec:
+  stream: square
+  subscriber: square

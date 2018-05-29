@@ -1,7 +1,0 @@
-apiVersion: spike.local/v1alpha1
-kind: Subscription
-metadata:
-  name: test2foo
-spec:
-  stream: test
-  subscriber: foo
