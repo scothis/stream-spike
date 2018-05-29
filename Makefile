@@ -59,6 +59,10 @@ istio-setup:
 		kubectl apply -f -
 	kubectl label namespace default istio-injection=enabled
 
+istio-monitoring:
+	kubectl apply -f istio-0.7.1/addons/prometheus.yaml
+	kubectl apply -f istio-0.7.1/addons/grafana.yaml
+
 kubectl-apply:
 	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/stream-resource.yaml
