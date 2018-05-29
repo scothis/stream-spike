@@ -66,10 +66,13 @@ istio-monitoring:
 istio-tracing:
 	kubectl apply -f istio-0.7.1/addons/zipkin.yaml
 
+ifeq ($(KO_DOCKER_REPO)$(KO_FLAGS),)
+override KO_FLAGS = -L
+endif
 kubectl-apply:
 	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/broker-resource.yaml
 	kubectl apply -f config/stream-resource.yaml
 	kubectl apply -f config/subscription-resource.yaml
-	ko apply -f config/controller-deployment.yaml
-	ko apply -f config/stub-broker.yaml
+	ko apply $(KO_FLAGS) -f config/controller-deployment.yaml
+	ko apply $(KO_FLAGS) -f config/stub-broker.yaml
