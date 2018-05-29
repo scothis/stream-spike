@@ -63,9 +63,4 @@ kubectl-apply:
 	kubectl apply -f config/rbac.yaml
 	kubectl apply -f config/stream-resource.yaml
 	kubectl apply -f config/subscription-resource.yaml
-ifeq ("$(KO_DOCKER_REPO)","")
-	$(info KO_DOCKER_REPO is not set, using local docker daemon)
-	ko apply -L -f config/controller-deployment.yaml
-else
-	ko apply -f config/controller-deployment.yaml
-endif
+	ko apply $(KO_FLAGS) -f config/controller-deployment.yaml
